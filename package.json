@@ -1,0 +1,11 @@
+{
+  "name": "form-filler-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync-env": "node scripts/sync-env-from-local.mjs"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^5.6.205"
+  }
+}

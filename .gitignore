@@ -1,0 +1,5 @@
+node_modules/
+.env.local
+src/env.secret.js
+*.pdf
+*.txt

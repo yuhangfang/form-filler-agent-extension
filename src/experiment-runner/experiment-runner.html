@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Experiment Runner</title>
+    <link rel="stylesheet" href="./experiment-runner.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>JS Experiment Runner</h1>
+      <p class="hint">
+        Runs entirely in extension context using <code>chrome.scripting</code> + <code>chrome.runtime.sendMessage</code>.
+      </p>
+
+      <section class="panel">
+        <h2>Target Page</h2>
+        <div class="row">
+          <button id="runExperiment" type="button">Run On Selected Tab</button>
+          <label for="targetTab">Target tab</label>
+          <select id="targetTab"></select>
+          <button id="refreshTabs" class="icon-button" type="button" aria-label="Refresh tabs" title="Refresh tabs">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
+            </svg>
+          </button>
+        </div>
+        <p id="status" class="status"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Frame Scrape Summary</h2>
+        <div id="frameSummary"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Experiment Outputs</h2>
+        <div class="tab-row" id="outputTabs">
+          <button type="button" class="tab-button" data-tab="domTab">Snapshot DOM Material</button>
+          <button type="button" class="tab-button" data-tab="playwrightTab">Browser Snapshot</button>
+          <button type="button" class="tab-button is-active" data-tab="fieldScanTab">Field Scan</button>
+        </div>
+
+        <div class="tab-panel" id="domTab">
+          <pre id="domOutline"></pre>
+        </div>
+        <div class="tab-panel" id="playwrightTab">
+          <pre id="playwrightSnapshot"></pre>
+        </div>
+        <div class="tab-panel is-active" id="fieldScanTab">
+          <div class="compare-grid">
+            <section class="compare-pane">
+              <h3>Snapshot Parser</h3>
+              <div id="snapshotParserOutput" class="wr-llm-output-host"></div>
+            </section>
+            <section class="compare-pane">
+              <h3>Page Screenshot</h3>
+              <div id="pageScreenshotOutput" class="screenshot-host"></div>
+            </section>
+            <section class="compare-pane">
+              <div class="pane-heading">
+                <h3>Chunked Snapshot</h3>
+                <button id="runChunkedLlm" class="secondary-small" type="button" disabled>Run Chunked LLM</button>
+              </div>
+              <div id="chunkedLlmScanOutput" class="wr-llm-output-host"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="../field-extraction/scan-result-adapters.js"></script>
+    <script src="./extracted-field-cards-view.js"></script>
+    <script type="module" src="./experiment-runner.js"></script>
+  </body>
+</html>

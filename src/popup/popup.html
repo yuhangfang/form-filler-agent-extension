@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Adaptive Form Filler</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1 class="sr-only">Adaptive Form Filler</h1>
+
+      <div class="io-toolbar" role="toolbar" aria-label="Resume and storage">
+        <label class="toolbar-btn toolbar-btn-primary" for="resumeFile">Upload PDF / TXT</label>
+        <input
+          id="resumeFile"
+          type="file"
+          class="visually-hidden"
+          accept=".pdf,.txt,application/pdf,text/plain"
+        />
+
+        <label class="toolbar-btn toolbar-btn-secondary" for="importStorageFile">Upload storage</label>
+        <input
+          id="importStorageFile"
+          type="file"
+          class="visually-hidden"
+          accept="application/json,.json"
+        />
+
+        <button id="exportStorage" type="button" class="toolbar-btn toolbar-btn-secondary">
+          Download storage
+        </button>
+      </div>
+
+      <div class="io-toolbar io-toolbar-clear" role="toolbar" aria-label="Danger zone">
+        <button id="clearStorage" type="button" class="toolbar-btn toolbar-btn-danger">
+          Clear all stored data…
+        </button>
+      </div>
+
+      <div class="status-stack" aria-live="polite">
+        <p id="fillStatus" class="status"></p>
+        <p id="resumeStatus" class="status"></p>
+        <p id="storageSummary" class="status"></p>
+      </div>
+
+      <section class="profiles-section" aria-label="Parsed resume and profile">
+        <div class="profiles-tabs-header">
+          <div class="tablist" role="tablist" aria-label="Profile sections">
+            <button
+              type="button"
+              role="tab"
+              id="tab-profile"
+              class="tab"
+              aria-selected="true"
+              aria-controls="panel-profile"
+              tabindex="0"
+            >
+              Quick profile
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="tab-hints"
+              class="tab"
+              aria-selected="false"
+              aria-controls="panel-hints"
+              tabindex="-1"
+            >
+              Learned fields
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="tab-skills"
+              class="tab"
+              aria-selected="false"
+              aria-controls="panel-skills"
+              tabindex="-1"
+            >
+              Skills
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="tab-experience"
+              class="tab"
+              aria-selected="false"
+              aria-controls="panel-experience"
+              tabindex="-1"
+            >
+              Experience
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="tab-internships"
+              class="tab"
+              aria-selected="false"
+              aria-controls="panel-internships"
+              tabindex="-1"
+            >
+              Internships
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="tab-education"
+              class="tab"
+              aria-selected="false"
+              aria-controls="panel-education"
+              tabindex="-1"
+            >
+              Education
+            </button>
+          </div>
+          <button
+            id="refreshResumeData"
+            type="button"
+            class="icon-button"
+            aria-label="Refresh resume data and saved field hints"
+            title="Refresh resume data and saved field hints"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+              <path d="M21 3v5h-5" />
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+              <path d="M8 16H3v5" />
+            </svg>
+          </button>
+        </div>
+
+        <div
+          id="panel-profile"
+          role="tabpanel"
+          aria-labelledby="tab-profile"
+          class="tab-panel"
+          tabindex="0"
+        >
+          <div class="resume-details-panel">
+            <p class="profile-section-title">Contact</p>
+            <label>Full Name <input id="fullName" type="text" /></label>
+            <div class="profile-row-2">
+              <label>First Name <input id="firstName" type="text" /></label>
+              <label>Last Name <input id="lastName" type="text" /></label>
+            </div>
+            <label>Email <input id="email" type="email" /></label>
+            <label>
+              Register Password (optional)
+              <input id="registerPassword" type="password" placeholder="Uses default if empty" />
+            </label>
+            <small>If empty, register flow uses the default fallback password convention.</small>
+            <label>Phone <input id="phone" type="text" /></label>
+
+            <p class="profile-section-title">Location</p>
+            <label>Address <input id="address" type="text" /></label>
+            <div class="profile-row-2">
+              <label>City <input id="city" type="text" /></label>
+              <label>State <input id="state" type="text" /></label>
+            </div>
+            <div class="profile-row-2">
+              <label>Zip <input id="zip" type="text" /></label>
+              <label>Country <input id="country" type="text" /></label>
+            </div>
+
+            <p class="profile-section-title">Online</p>
+            <label>LinkedIn <input id="linkedin" type="url" /></label>
+            <label>GitHub <input id="github" type="url" /></label>
+            <label>Website <input id="website" type="url" /></label>
+
+            <p class="profile-section-title">Professional</p>
+            <label>Current Title <input id="currentTitle" type="text" /></label>
+            <label>Current Company <input id="currentCompany" type="text" /></label>
+            <label>Years of Experience <input id="yearsOfExperience" type="text" /></label>
+
+            <p class="profile-section-title">Education</p>
+            <label>Highest Degree <input id="highestDegree" type="text" /></label>
+            <label>Major <input id="major" type="text" /></label>
+            <label>University <input id="university" type="text" /></label>
+            <label>Graduation Year <input id="graduationYear" type="text" /></label>
+
+            <p class="profile-section-title">Work Authorization &amp; Preferences</p>
+            <label>Work Authorization <input id="workAuthorization" type="text" placeholder="US Citizen / H1B / etc." /></label>
+            <label>Requires Sponsorship <input id="requiresSponsorship" type="text" /></label>
+            <label>Desired Salary <input id="desiredSalary" type="text" /></label>
+            <label>Notice Period <input id="noticePeriod" type="text" /></label>
+            <label>Willing to Relocate <input id="willingToRelocate" type="text" /></label>
+
+            <p class="profile-section-title">Demographics (optional — used for EEO questions)</p>
+            <label>Gender Identity <input id="gender" type="text" placeholder="Prefer not to say" /></label>
+            <label>Race / Ethnicity <input id="ethnicity" type="text" placeholder="Prefer not to say" /></label>
+            <label>Veteran Status <input id="veteranStatus" type="text" placeholder="Prefer not to say" /></label>
+            <label>Disability Status <input id="disabilityStatus" type="text" placeholder="Prefer not to say" /></label>
+
+            <button id="saveProfile" type="button">Save Profile</button>
+          </div>
+        </div>
+
+        <div
+          id="panel-hints"
+          role="tabpanel"
+          aria-labelledby="tab-hints"
+          class="tab-panel"
+          hidden
+          tabindex="0"
+        >
+          <p class="hints-intro">
+            Values remembered from form submit, corrections, or AI fill (keyed by site and field
+            fingerprint). Used on the next fill for the same host.
+          </p>
+          <div id="fieldHintsContainer" class="struct-stack hints-stack"></div>
+        </div>
+
+        <div
+          id="panel-skills"
+          role="tabpanel"
+          aria-labelledby="tab-skills"
+          class="tab-panel"
+          hidden
+          tabindex="0"
+        >
+          <div id="skillsList" class="skills-cloud"></div>
+        </div>
+
+        <div
+          id="panel-experience"
+          role="tabpanel"
+          aria-labelledby="tab-experience"
+          class="tab-panel"
+          hidden
+          tabindex="0"
+        >
+          <div id="experienceStructured" class="resume-card-stack"></div>
+        </div>
+
+        <div
+          id="panel-internships"
+          role="tabpanel"
+          aria-labelledby="tab-internships"
+          class="tab-panel"
+          hidden
+          tabindex="0"
+        >
+          <div id="internshipsStructured" class="resume-card-stack"></div>
+        </div>
+
+        <div
+          id="panel-education"
+          role="tabpanel"
+          aria-labelledby="tab-education"
+          class="tab-panel"
+          hidden
+          tabindex="0"
+        >
+          <div id="educationStructured" class="resume-card-stack"></div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>
