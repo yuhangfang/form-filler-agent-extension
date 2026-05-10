@@ -645,10 +645,14 @@ function initFloatingBar() {
     if (fields.length > 0) _barHasScannedFields = true;
     snapshotCards.index = 0;
     snapshotCards.title = String(res?.scan?.title || "");
-    hideSnapshotFieldContext();
-    statusEl.textContent = res?.ok
-      ? (res.summary || `${fields.length} field(s) are found`)
-      : (res?.error || "Failed to load fields.");
+    if (res?.ok && fields.length > 0) {
+      showSnapshotFieldContext();
+    } else {
+      hideSnapshotFieldContext();
+      statusEl.textContent = res?.ok
+        ? (res.summary || `${fields.length} field(s) are found`)
+        : (res?.error || "Failed to load fields.");
+    }
     setFloatingBarBusy(false);
   }
 
