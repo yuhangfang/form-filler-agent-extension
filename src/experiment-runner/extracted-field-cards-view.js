@@ -3,8 +3,6 @@
  * Classic script: attaches view helpers to globalThis.
  */
 (function (g) {
-  const PLACEHOLDER = "(none — check profile or fill manually)";
-
   const CSS = `
 .reader-pane-title{margin:0 0 8px;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.04em;}
 .reader-fields-list{display:flex;flex-direction:column;gap:10px;color:#e5e7eb;white-space:normal;word-break:normal;}
@@ -28,24 +26,29 @@
 .reader-field-group-meta.reader-field-section-project{border-color:#0891b2;background:rgba(14,116,144,.16);}
 .reader-field-group-meta.reader-field-section-certification{border-color:#ca8a04;background:rgba(133,77,14,.16);}
 .reader-field-group-meta.reader-field-section-website{border-color:#059669;background:rgba(6,95,70,.16);}
-.reader-field-card{background:#111b30;border:1px solid #2b3a54;border-radius:8px;padding:10px 12px;border-left:4px solid #475569;font-size:12px;line-height:1.45;}
-.reader-field-card.reader-field-conf-high{border-left-color:#22c55e;}
-.reader-field-card.reader-field-conf-mid{border-left-color:#f59e0b;}
-.reader-field-card.reader-field-conf-low{border-left-color:#64748b;}
+.reader-field-card{background:#111b30;border:1px solid #2b3a54;border-left:4px solid #64748b;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.45;}
+.reader-field-card.reader-field-type-text{border-left-color:#38bdf8;}
+.reader-field-card.reader-field-type-select{border-left-color:#a78bfa;}
+.reader-field-card.reader-field-type-radio{border-left-color:#f59e0b;}
+.reader-field-card.reader-field-type-checkbox{border-left-color:#22c55e;}
+.reader-field-card.reader-field-type-file{border-left-color:#ec4899;}
+.reader-field-card.reader-field-type-number{border-left-color:#14b8a6;}
+.reader-field-card.reader-field-type-date{border-left-color:#eab308;}
 .reader-field-card.reader-field-needs-expansion{border-left-color:#a855f7;background:#17152b;}
 .reader-field-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 10px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #1e293b;}
 .reader-field-idx{font-size:10px;font-weight:700;color:#94a3b8;min-width:1.5rem;}
 .reader-field-label{font-weight:600;color:#e5e7eb;flex:1 1 140px;min-width:0;word-break:break-word;}
 .reader-field-type{font-size:10px;text-transform:uppercase;letter-spacing:0.04em;padding:2px 8px;border-radius:999px;background:#1e293b;color:#94a3b8;border:1px solid #334155;}
-.reader-field-conf{font-size:11px;font-weight:600;margin-left:auto;}
-.reader-field-conf.reader-field-conf-high{color:#22c55e;}
-.reader-field-conf.reader-field-conf-mid{color:#f59e0b;}
-.reader-field-conf.reader-field-conf-low{color:#94a3b8;}
+.reader-field-type.reader-field-type-text{background:rgba(14,116,144,.2);border-color:#0e7490;color:#bae6fd;}
+.reader-field-type.reader-field-type-select{background:rgba(109,40,217,.2);border-color:#6d28d9;color:#ddd6fe;}
+.reader-field-type.reader-field-type-radio{background:rgba(180,83,9,.2);border-color:#b45309;color:#fde68a;}
+.reader-field-type.reader-field-type-checkbox{background:rgba(21,128,61,.2);border-color:#15803d;color:#bbf7d0;}
+.reader-field-type.reader-field-type-file{background:rgba(190,24,93,.2);border-color:#be185d;color:#fbcfe8;}
+.reader-field-type.reader-field-type-number{background:rgba(15,118,110,.2);border-color:#0f766e;color:#ccfbf1;}
+.reader-field-type.reader-field-type-date{background:rgba(161,98,7,.2);border-color:#a16207;color:#fef3c7;}
 .reader-field-block{margin-top:6px;}
 .reader-field-block:first-of-type{margin-top:0;}
 .reader-field-block-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#94a3b8;margin-bottom:4px;}
-.reader-field-suggested{font-family:ui-monospace,monospace;font-size:12px;color:#e0f2fe;background:#0c1222;border:1px solid #334155;border-radius:6px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto;}
-.reader-field-suggested.reader-field-empty{color:#94a3b8;font-style:italic;}
 .reader-field-why{font-size:11px;color:#cbd5e1;white-space:pre-wrap;word-break:break-word;}
 .reader-field-options{display:flex;flex-wrap:wrap;gap:6px;}
 .reader-field-option-pill{display:inline-flex;align-items:center;max-width:100%;padding:2px 8px;border-radius:999px;border:1px solid #334155;background:#0f172a;color:#cbd5e1;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -62,17 +65,22 @@
       .replace(/"/g, "&quot;");
   }
 
-  function readerFieldConfBand(conf) {
-    const c = Number.isFinite(conf) ? conf : 0;
-    if (c >= 0.72) return "high";
-    if (c >= 0.38) return "mid";
-    return "low";
-  }
-
   function titleCase(text) {
     return String(text || "")
       .toLowerCase()
       .replace(/\b[a-z]/g, (char) => char.toUpperCase());
+  }
+
+  function fieldTypeClass(type) {
+    const normalized = String(type || "other").toLowerCase();
+    if (["textbox", "text", "textarea", "searchbox", "email", "tel", "phone", "url"].includes(normalized)) return "text";
+    if (["select", "combobox", "listbox", "dropdown"].includes(normalized)) return "select";
+    if (["radio", "radiogroup"].includes(normalized)) return "radio";
+    if (["checkbox", "switch"].includes(normalized)) return "checkbox";
+    if (["file", "upload"].includes(normalized)) return "file";
+    if (["number", "spinbutton", "slider"].includes(normalized)) return "number";
+    if (["date", "month", "year"].includes(normalized)) return "date";
+    return "other";
   }
 
   function fieldTextForGrouping(field) {
@@ -180,15 +188,12 @@
     const rawLabel = f.field_label || f.label || "(unnamed field)";
     const label = stripGroupPrefix(rawLabel, group);
     const type = f.field_type || f.type || "other";
-    const suggested = f.suggested_value != null ? String(f.suggested_value) : "";
+    const typeClass = fieldTypeClass(type);
     const why = f.why != null ? String(f.why) : "";
     const needsExpansion = !!(f.needsExpansion || f.needs_expansion);
     const expansionReason = String(f.expansionReason || f.expansion_reason || "").trim();
-    const conf = Number.isFinite(f.confidence) ? f.confidence : 0;
-    const band = readerFieldConfBand(conf);
-    const suggestedEmpty = !suggested.trim();
     return (
-      '<article class="reader-field-card reader-field-conf-' + band + (needsExpansion ? " reader-field-needs-expansion" : "") + '">' +
+      '<article class="reader-field-card reader-field-type-' + escapeHtml(typeClass) + (needsExpansion ? " reader-field-needs-expansion" : "") + '">' +
       (group && options.includeGroupMeta !== false
         ? '<div class="reader-field-group-meta reader-field-section-' + escapeHtml(group.kind) + '">' +
           '<span class="reader-field-group-title">' + escapeHtml(group.title) + "</span>" +
@@ -198,15 +203,9 @@
       '<div class="reader-field-head">' +
       '<span class="reader-field-idx">' + (index + 1) + ".</span>" +
       '<span class="reader-field-label">' + escapeHtml(label) + "</span>" +
-      '<span class="reader-field-type">' + escapeHtml(type) + "</span>" +
+      '<span class="reader-field-type reader-field-type-' + escapeHtml(typeClass) + '">' + escapeHtml(type) + "</span>" +
       (needsExpansion ? '<span class="reader-expansion-pill">Needs expansion</span>' : "") +
-      '<span class="reader-field-conf reader-field-conf-' + band + '">' + escapeHtml((conf * 100).toFixed(0)) + "% confidence</span>" +
       "</div>" +
-      '<div class="reader-field-block">' +
-      '<div class="reader-field-block-label">Suggested answer</div>' +
-      '<div class="reader-field-suggested' + (suggestedEmpty ? " reader-field-empty" : "") + '">' +
-      escapeHtml(suggestedEmpty ? PLACEHOLDER : suggested) +
-      "</div></div>" +
       (needsExpansion
         ? '<div class="reader-field-block"><div class="reader-field-block-label">Expansion needed</div>' +
           '<div class="reader-field-why">' + escapeHtml(expansionReason || "Options may only mount after opening this control.") + "</div></div>"
@@ -282,15 +281,12 @@
       const rawLabel = f.field_label || f.label || "(unnamed field)";
       const label = stripGroupPrefix(rawLabel, group);
       const type = f.field_type || f.type || "other";
-      const suggested = f.suggested_value != null ? String(f.suggested_value) : "";
+      const typeClass = fieldTypeClass(type);
       const why = f.why != null ? String(f.why) : "";
       const needsExpansion = !!(f.needsExpansion || f.needs_expansion);
       const expansionReason = String(f.expansionReason || f.expansion_reason || "").trim();
       const card = document.createElement("article");
-      const conf = Number.isFinite(f.confidence) ? f.confidence : 0;
-      const band = readerFieldConfBand(conf);
-      const suggestedEmpty = !suggested.trim();
-      card.className = `reader-field-card reader-field-conf-${band}${needsExpansion ? " reader-field-needs-expansion" : ""}`;
+      card.className = `reader-field-card reader-field-type-${typeClass}${needsExpansion ? " reader-field-needs-expansion" : ""}`;
       card.setAttribute("aria-label", `Field ${i + 1}: ${label}`);
 
       const groups = Array.isArray(f.optionGroups || f.option_groups)
@@ -309,15 +305,9 @@
         '<div class="reader-field-head">' +
         '<span class="reader-field-idx">' + (i + 1) + ".</span>" +
         '<span class="reader-field-label">' + escapeHtml(label) + "</span>" +
-        '<span class="reader-field-type">' + escapeHtml(type) + "</span>" +
+        '<span class="reader-field-type reader-field-type-' + escapeHtml(typeClass) + '">' + escapeHtml(type) + "</span>" +
         (needsExpansion ? '<span class="reader-expansion-pill">Needs expansion</span>' : "") +
-        '<span class="reader-field-conf reader-field-conf-' + band + '">' + escapeHtml((conf * 100).toFixed(0)) + "% confidence</span>" +
         "</div>" +
-        '<div class="reader-field-block">' +
-        '<div class="reader-field-block-label">Suggested answer</div>' +
-        '<div class="reader-field-suggested' + (suggestedEmpty ? " reader-field-empty" : "") + '">' +
-        escapeHtml(suggestedEmpty ? PLACEHOLDER : suggested) +
-        "</div></div>" +
         (needsExpansion
           ? '<div class="reader-field-block"><div class="reader-field-block-label">Expansion needed</div>' +
             '<div class="reader-field-why">' + escapeHtml(expansionReason || "Options may only mount after opening this control.") + "</div></div>"
@@ -381,7 +371,7 @@
     });
   }
 
-  const api = { mount, PLACEHOLDER, classifyFieldGroup, renderSingleCardHtml };
+  const api = { mount, classifyFieldGroup, renderSingleCardHtml };
   g.ExtractedFieldCardsView = api;
   // Backward compatibility for existing callers.
   g.WebsiteReaderLlmView = api;
