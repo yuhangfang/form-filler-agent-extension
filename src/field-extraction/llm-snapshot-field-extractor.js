@@ -96,7 +96,7 @@ function aggregateLlmStats(results) {
   return stats;
 }
 
-async function extractReaderDomFieldsFromSnapshot({
+async function parseFormFieldsFromSnapshotWithLLM({
   apiKey,
   url,
   title,
@@ -201,69 +201,12 @@ ${snapshotClip}`;
 }
 
 /**
- * Analyze rendered DOM controls and infer user-visible fields to fill.
- * @param {{ url: string, title?: string, snapshotText?: string }} input
- * @returns {Promise<{ ok: boolean, fields?: Array<object>, stats?: object, error?: string }>}
- */
-export async function analyzeDomFieldScan({ url, title = "", snapshotText = "" }) {
-  const apiKey = (OPENAI_API_KEY || "").trim();
-  if (!apiKey) {
-    return { ok: false, error: "No OPENAI_API_KEY (run npm run sync-env after filling .env.local)" };
-  }
-  if (!url || typeof url !== "string") {
-    return { ok: false, error: "url is required" };
-  }
-
-  // Send the captured page content to the LLM exactly once. The extraction
-  // response is used directly for both debug DOM fields and visible LLM fields.
-  const fieldExtraction = await extractReaderDomFieldsFromSnapshot({
-    apiKey,
-    url,
-    title,
-    snapshotText
-  });
-
-  if (!fieldExtraction.ok) {
-    return {
-      ok: false,
-      error: fieldExtraction.error || "LLM field extraction failed.",
-      llmInputs: [fieldExtraction.llmInput].filter(Boolean),
-      stats: fieldExtraction.stats || {}
-    };
-  }
-
-  const domFields = Array.isArray(fieldExtraction.fields) ? fieldExtraction.fields : [];
-  const fields = toDisplayFields(domFields);
-
-  return {
-    ok: true,
-    fields,
-    domFields,
-    llmInputs: [fieldExtraction.llmInput].filter(Boolean),
-    stats: {
-      ...(fieldExtraction.stats || {}),
-      controlsCount: domFields.length,
-      llm_call_count: 1,
-      total_prompt_tokens: Number(fieldExtraction.stats?.prompt_tokens || 0),
-      total_completion_tokens: Number(fieldExtraction.stats?.completion_tokens || 0),
-      total_tokens: Number(fieldExtraction.stats?.total_tokens || 0),
-      total_est_prompt_tokens: Number(fieldExtraction.stats?.est_prompt_tokens || 0),
-      total_est_response_tokens: Number(fieldExtraction.stats?.est_response_tokens || 0),
-      total_est_tokens:
-        Number(fieldExtraction.stats?.est_prompt_tokens || 0) +
-        Number(fieldExtraction.stats?.est_response_tokens || 0),
-      total_llm_call_ms: Number(fieldExtraction.stats?.elapsed_ms || 0)
-    }
-  };
-}
-
-/**
  * Extract fields by splitting the browser_snapshot into structure-aware chunks and
  * asking the LLM to extract each chunk independently. Used for Experiment Runner comparison.
  * @param {{ url: string, title?: string, snapshotText?: string, unfilledOnly?: boolean }} input
  * @returns {Promise<{ ok: boolean, fields?: Array<object>, domFields?: Array<object>, llmInputs?: Array<object>, chunks?: Array<object>, stats?: object, error?: string }>}
  */
-export async function analyzeDomFieldScanChunked({ url, title = "", snapshotText = "", unfilledOnly = false }) {
+export async function parseSnapshotFieldsWithLLMChunked({ url, title = "", snapshotText = "", unfilledOnly = false }) {
   const apiKey = (OPENAI_API_KEY || "").trim();
   if (!apiKey) {
     return { ok: false, error: "No OPENAI_API_KEY (run npm run sync-env after filling .env.local)" };
@@ -283,7 +226,7 @@ export async function analyzeDomFieldScanChunked({ url, title = "", snapshotText
       results.push({ ok: true, fields: [], skipped: true, chunk });
       continue;
     }
-    const result = await extractReaderDomFieldsFromSnapshot({
+    const result = await parseFormFieldsFromSnapshotWithLLM({
       apiKey,
       url,
       title,

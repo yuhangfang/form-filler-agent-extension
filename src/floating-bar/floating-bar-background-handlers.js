@@ -1,7 +1,7 @@
 import { tryAttachStoredResume } from "../applicant-data/resume-attachment.js";
 import { BROWSER_TOOLS_INJECT_CHAIN } from "../browser-capture/browser-tools-inject-chain.js";
-import { captureScanDom, formatChunkedLlmScan, formatSnapshotScan } from "../browser-capture/dom-scan-capture.js";
-import { analyzeDomFieldScan, analyzeDomFieldScanChunked } from "../field-extraction/llm-snapshot-field-extractor.js";
+import { captureDomThenSnapshot } from "../browser-capture/dom-scan-capture.js";
+import { parseSnapshotFieldsWithLLMChunked } from "../field-extraction/llm-snapshot-field-extractor.js";
 import { displayLabelForField } from "../field-extraction/field-normalization.js";
 import { parseSnapshotFields } from "../field-extraction/snapshot-field-parser.js";
 
@@ -765,6 +765,82 @@ export function createFloatingBarHandlers(deps) {
     }
   }
 
+  async function probeCandidateFillFailure(tabId, candidate) {
+    try {
+      const rows = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: (c) => {
+          const expectedHost = String(c?.frameHost || "");
+          const host = typeof location !== "undefined" ? location.hostname : "";
+          if (expectedHost && host && expectedHost !== host) return null;
+          const fieldTools = globalThis.__formFillerFieldDescriptorTools;
+          const fillTools = globalThis.__formFillerControlFillTools;
+          const choiceTools = globalThis.__formFillerChoiceControlTools;
+          if (!fieldTools || !fillTools || !choiceTools) return null;
+          const fp = String(c?.fingerprint || "");
+          if (!fp) return null;
+          const controls = choiceTools.collectFormControlsAndRoleCheckables(document);
+          const control = controls.find((el) => {
+            try {
+              return fieldTools.computeFieldFingerprint(el) === fp;
+            } catch {
+              return false;
+            }
+          });
+          if (!(control instanceof Element)) {
+            return { frameHost: host, found: false, reason: "control_not_found" };
+          }
+          const rect = control.getBoundingClientRect?.();
+          const type = control instanceof HTMLInputElement
+            ? String(control.type || "text").toLowerCase()
+            : control instanceof HTMLSelectElement
+              ? "select"
+              : control instanceof HTMLTextAreaElement
+                ? "textarea"
+                : String(control.getAttribute("role") || control.tagName || "").toLowerCase();
+          const choiceType = choiceTools.checkableType(control);
+          const isVisible = !!fillTools.isVisibleForScrape(control);
+          const isDisabled = !!(control.disabled || control.readOnly || control.getAttribute("aria-disabled") === "true");
+          let optionCount = 0;
+          let optionPreview = [];
+          if (control instanceof HTMLSelectElement) {
+            optionCount = Number(control.options?.length || 0);
+            optionPreview = Array.from(control.options || [])
+              .slice(0, 6)
+              .map((opt) => String(opt.textContent || "").trim())
+              .filter(Boolean);
+          } else if (choiceType === "radio" || choiceType === "checkbox") {
+            const members = choiceType === "radio"
+              ? choiceTools.collectRadioGroupMembers(control)
+              : choiceTools.collectCheckboxGroupMembers(control);
+            optionCount = members.length;
+            optionPreview = members
+              .slice(0, 6)
+              .map((m) => choiceTools.checkboxOrRadioLabel(m))
+              .filter(Boolean);
+          }
+          return {
+            frameHost: host,
+            found: true,
+            isVisible,
+            isDisabled,
+            type: choiceType || type,
+            optionCount,
+            optionPreview,
+            rect: rect
+              ? { w: Math.round(rect.width || 0), h: Math.round(rect.height || 0) }
+              : null
+          };
+        },
+        args: [candidate]
+      });
+      const result = (rows || []).find((row) => !row.error && row.result)?.result;
+      return result || { found: false, reason: "probe_no_result" };
+    } catch (error) {
+      return { found: false, reason: error instanceof Error ? error.message : "probe_failed" };
+    }
+  }
+
   async function runFieldByFieldFill(tabId, profile, domain, options = {}) {
     const emitProgress = typeof options.onProgress === "function" ? options.onProgress : async () => {};
     const aiFallbackEnabled = options.aiFallbackEnabled !== false;
@@ -796,8 +872,11 @@ export function createFloatingBarHandlers(deps) {
     let alreadyFilled = 0;
     let llmApplied = 0;
     let unresolved = 0;
+    let troubleshootingRecovered = 0;
     let previousDeterministicFilled = false;
     const llmQueue = [];
+    const unresolvedQueue = [];
+    const unresolvedSeen = new Set();
     const fieldQuestion = (candidate) =>
       (
         String(candidate?.cardLabel || "").trim() ||
@@ -831,6 +910,12 @@ export function createFloatingBarHandlers(deps) {
       });
     };
     const decisionDetail = (parts) => parts.filter(Boolean).join(" — ").slice(0, 420);
+    const rememberUnresolved = (item) => {
+      const fp = String(item?.candidate?.fingerprint || "").slice(0, 32);
+      if (!fp || unresolvedSeen.has(fp)) return;
+      unresolvedSeen.add(fp);
+      unresolvedQueue.push(item);
+    };
 
     // Pass 1: deterministic over all fields (bulk-first behavior).
     for (let i = 0; i < candidates.length; i += 1) {
@@ -944,6 +1029,14 @@ export function createFloatingBarHandlers(deps) {
           source: "unresolved",
           detail
         });
+        rememberUnresolved({
+          index: i + 1,
+          total: candidates.length,
+          question,
+          candidate,
+          detAttempts,
+          deterministicReason: deterministic?.reason || "deterministic_unresolved_ai_disabled"
+        });
         previousDeterministicFilled = false;
         continue;
       }
@@ -971,6 +1064,14 @@ export function createFloatingBarHandlers(deps) {
           reason: deterministic?.reason || "password_no_llm",
           source: "unresolved",
           detail
+        });
+        rememberUnresolved({
+          index: i + 1,
+          total: candidates.length,
+          question,
+          candidate,
+          detAttempts,
+          deterministicReason: deterministic?.reason || "password_no_llm"
         });
         previousDeterministicFilled = false;
         continue;
@@ -1079,6 +1180,7 @@ export function createFloatingBarHandlers(deps) {
           value: String(guess?.value || "").slice(0, 120),
           detail
         });
+        rememberUnresolved(item);
       };
       const llm = await handleFormFieldsLlmBatch({
         tabId,
@@ -1197,6 +1299,7 @@ export function createFloatingBarHandlers(deps) {
               source: "unresolved",
               detail
             });
+            rememberUnresolved(out);
             continue;
           }
           const detail = decisionDetail([
@@ -1227,7 +1330,97 @@ export function createFloatingBarHandlers(deps) {
             value: String(out.guess?.value || "").slice(0, 120),
             detail
           });
+          rememberUnresolved(out);
         }
+      }
+    }
+
+    // Pass 3: troubleshoot unresolved fields one by one (probe + targeted AI retry).
+    if (unresolvedQueue.length && aiFallbackEnabled) {
+      await emitProgress(`Troubleshooting ${unresolvedQueue.length} unresolved field(s) one by one...`, {
+        phase: "fill_troubleshoot_start",
+        unresolved: unresolvedQueue.length
+      });
+      for (const item of unresolvedQueue) {
+        const fingerprint = String(item?.candidate?.fingerprint || "").slice(0, 32);
+        if (!fingerprint) continue;
+        const question = String(item?.question || fieldQuestion(item?.candidate)).slice(0, 140);
+        await focusCandidateInTab(tabId, item.candidate);
+        const probe = await probeCandidateFillFailure(tabId, item.candidate);
+        const probeSummary = [
+          probe?.found === false ? `probe:${probe?.reason || "not_found"}` : "",
+          probe?.isVisible === false ? "hidden" : "",
+          probe?.isDisabled ? "disabled" : "",
+          Number(probe?.optionCount || 0) <= 0 &&
+            (String(item?.candidate?.kind || "").toLowerCase() === "select" ||
+             String(item?.candidate?.kind || "").toLowerCase() === "radio" ||
+             String(item?.candidate?.kind || "").toLowerCase() === "checkbox")
+            ? "no_options_visible"
+            : "",
+          Array.isArray(probe?.optionPreview) && probe.optionPreview.length
+            ? `options:${probe.optionPreview.join(" | ").slice(0, 180)}`
+            : ""
+        ].filter(Boolean).join(" — ");
+
+        await emitProgress(
+          `Troubleshoot field ${item.index}/${item.total}: ${question}...`,
+          { phase: "fill_troubleshoot_field", index: item.index, total: item.total, field: item.candidate }
+        );
+
+        const retry = await handleFormFieldsLlmBatch({
+          tabId,
+          domain,
+          profile,
+          candidates: [item.candidate]
+        });
+        const retryGuess = Array.isArray(retry?.guesses)
+          ? retry.guesses.find((g) => String(g?.fingerprint || "").slice(0, 32) === fingerprint && String(g?.value || "").trim())
+          : null;
+
+        if (retryGuess?.value) {
+          const apply = await applySingleCandidateGuess(tabId, item.candidate, retryGuess);
+          if (Number(apply?.applied || 0) > 0) {
+            llmApplied += Number(apply?.applied || 0);
+            troubleshootingRecovered += 1;
+            unresolved = Math.max(0, unresolved - 1);
+            await traceField({
+              index: item.index,
+              total: item.total,
+              description: question,
+              value: String(retryGuess.value || "").slice(0, 120),
+              filled: "yes",
+              approach: "llm retry (troubleshoot)",
+              field: item.candidate
+            });
+            decisions.push({
+              fingerprint: item.candidate?.fingerprint,
+              field: item.candidate?.name || item.candidate?.elementName || item.candidate?.kind || "field",
+              reason: "llm_troubleshoot_recovered",
+              source: "llm",
+              value: String(retryGuess.value || "").slice(0, 120),
+              detail: decisionDetail([
+                "resolved in per-field troubleshooting",
+                `retry source: ${retryGuess.source || "llm"}`,
+                `apply steps: ${(apply?.steps || []).join(" → ")}`,
+                probeSummary
+              ])
+            });
+            continue;
+          }
+        }
+
+        decisions.push({
+          fingerprint: item.candidate?.fingerprint,
+          field: item.candidate?.name || item.candidate?.elementName || item.candidate?.kind || "field",
+          reason: "troubleshoot_unresolved",
+          source: "unresolved",
+          detail: decisionDetail([
+            "still unresolved after per-field troubleshooting",
+            retry?.llmError ? `retry llmError: ${retry.llmError}` : "",
+            !retryGuess?.value ? "retry returned no value" : "retry value could not apply",
+            probeSummary
+          ])
+        });
       }
     }
 
@@ -1246,13 +1439,14 @@ export function createFloatingBarHandlers(deps) {
     }
 
     const filledCount = deterministicFilled + llmApplied;
-    const baseSummary = `Filled ${filledCount} field(s): deterministic ${deterministicFilled}, AI ${llmApplied}${aiFallbackEnabled ? "" : " (off)"}, unresolved ${unresolved}.`;
+    const baseSummary = `Filled ${filledCount} field(s): deterministic ${deterministicFilled}, AI ${llmApplied}${aiFallbackEnabled ? "" : " (off)"}, unresolved ${unresolved}${troubleshootingRecovered ? `, recovered ${troubleshootingRecovered} in troubleshooting` : ""}.`;
     return {
       filledCount,
       deterministicFilled,
       alreadyFilled,
       llmApplied,
       unresolved,
+      troubleshootingRecovered,
       decisions,
       fieldFillLog,
       resumeAttached,
@@ -1282,7 +1476,7 @@ export function createFloatingBarHandlers(deps) {
     const resumeRecord = await getLocal(KEYS.resumeRecord, null);
     const { desiredEducationRows, desiredExperienceRows } = desiredRepeatRowsFromResume(resumeRecord);
     // Snapshot first so `__browserToolRefs` is populated when we build the queue (`snapshotRef` matches card refs).
-    const snapshotCapture = await captureScanDom(tabId).catch(() => null);
+    const snapshotCapture = await captureDomThenSnapshot(tabId).catch(() => null);
     const candidatesRaw = await collectFieldFillQueue(tabId);
     const snapshotScan = snapshotCapture?.ok
       ? parseSnapshotFields({
@@ -1385,6 +1579,7 @@ export function createFloatingBarHandlers(deps) {
       missingNotes: merged.missingNotes,
       deterministicFilled: merged.deterministicFilled ?? 0,
       llmApplied: merged.llmApplied ?? 0,
+      troubleshootingRecovered: merged.troubleshootingRecovered ?? 0,
       llmNote: merged.llmNote || "",
       platform: merged.pageSetup?.platform || "",
       platformLabel,
@@ -1396,7 +1591,18 @@ export function createFloatingBarHandlers(deps) {
       ok: true,
       filledCount: result.filledCount || 0,
       summary: merged.summary || "Done.",
-      fieldFillLog: result.fieldFillLog || []
+      fieldFillLog: result.fieldFillLog || [],
+      fillReport: {
+        filledCount: Number(result.filledCount || 0),
+        deterministicFilled: Number(result.deterministicFilled || 0),
+        llmApplied: Number(result.llmApplied || 0),
+        troubleshootingRecovered: Number(result.troubleshootingRecovered || 0),
+        unresolved: Number(result.unresolved || 0),
+        decisions: Array.isArray(result.decisions) ? result.decisions : [],
+        fieldFillLog: Array.isArray(result.fieldFillLog) ? result.fieldFillLog : [],
+        timestamp: result.timestamp || new Date().toISOString(),
+        summary: merged.summary || "Done."
+      }
     };
   }
 
@@ -1434,155 +1640,160 @@ export function createFloatingBarHandlers(deps) {
     };
   }
 
-  async function handleFloatingBarFieldScan(sender, payload = {}) {
+  function readSnapshotFromPayload(payload = {}, tabUrl = "") {
+    const source = payload?.snapshot && typeof payload.snapshot === "object" ? payload.snapshot : payload;
+    const snapshotText = String(source?.snapshot_text || source?.snapshotText || "");
+    if (!snapshotText) return null;
+    return {
+      url: String(source?.url || tabUrl || ""),
+      requested_url: String(source?.requested_url || tabUrl || ""),
+      title: String(source?.title || ""),
+      domOutline: String(source?.domOutline || source?.dom_outline || ""),
+      snapshot_text: snapshotText,
+      snapshot_source: String(source?.snapshot_source || source?.snapshotSource || "provided_snapshot"),
+      timings: source?.timings || {}
+    };
+  }
+
+  async function handleParseSnapshotRules(sender, payload = {}) {
+    const started = Date.now();
     const tabId = Number(payload?.tabId || sender?.tab?.id || 0);
     const tabUrl = String(payload?.tabUrl || sender?.tab?.url || "");
-    if (!tabId || !tabUrl) return { ok: false, error: "No active tab context." };
-    const started = Date.now();
-    const sendProgress = async (text) => {
-      try {
-        await chrome.tabs.sendMessage(tabId, { type: "FLOATING_BAR_PROGRESS", text: String(text || "") });
-      } catch {
-        // ignore progress delivery failures
-      }
+    const providedSnapshot = readSnapshotFromPayload(payload, tabUrl);
+    const usedProvidedSnapshot = !!providedSnapshot;
+    let snapshot = providedSnapshot;
+    if (!snapshot) {
+      if (!tabId || !tabUrl) return { ok: false, error: "No active tab context." };
+      const captured = await captureDomThenSnapshot(tabId);
+      if (!captured.ok) return captured;
+      snapshot = {
+        url: String(captured.url || tabUrl || ""),
+        requested_url: tabUrl,
+        title: String(captured.title || ""),
+        domOutline: String(captured.domOutline || ""),
+        snapshot_text: String(captured.snapshot_text || ""),
+        snapshot_source: String(captured.snapshot_source || "extension_browser_snapshot"),
+        timings: captured.timings || {}
+      };
+    }
+    const parsedFieldScan = parseSnapshotFields({
+      url: snapshot.url || "",
+      title: snapshot.title || "",
+      snapshotText: snapshot.snapshot_text || ""
+    });
+    const snapshotFields = Array.isArray(parsedFieldScan.domFields) ? parsedFieldScan.domFields : [];
+    const normalizedParsedFieldScan = {
+      ok: !!parsedFieldScan?.ok,
+      error: parsedFieldScan?.error || "",
+      viewTitle: "Fields To Fill",
+      domFields: snapshotFields,
+      fieldCount: snapshotFields.length,
+      stats: parsedFieldScan?.stats || {}
     };
-    await sendProgress(
-      payload?.unfilledOnly || payload?.unfilled_only
-        ? "Evaluate: capturing fresh DOM snapshot..."
-        : "Experiment scan: capturing DOM..."
-    );
-    const domStart = Date.now();
-    const capture = await captureScanDom(tabId);
-    if (!capture.ok) return capture;
-    const domCaptureMs = Date.now() - domStart;
-    if (payload?.chunkedOnly || payload?.chunked_only) {
-      const unfilledOnly = !!(payload?.unfilledOnly || payload?.unfilled_only);
-      await sendProgress(
-        unfilledOnly ? "LLM scan: chunking unfilled fields..." : "LLM scan: analyzing structured chunks..."
-      );
-      const chunkedStart = Date.now();
-      const chunkedAi = await analyzeDomFieldScanChunked({
-        url: capture.url || tabUrl,
-        title: capture.title || "",
-        snapshotText: capture.snapshot_text || "",
-        unfilledOnly
-      }).catch((error) => ({
-        ok: false,
-        error: error instanceof Error ? error.message : String(error || "Chunked LLM scan failed.")
-      }));
-      const chunkedScan = formatChunkedLlmScan(chunkedAi);
-      return {
-        ok: !!chunkedAi.ok,
-        error: chunkedAi.error || "",
-        summary: chunkedAi.ok
-          ? `Chunked LLM scan found ${Array.isArray(chunkedAi.fields) ? chunkedAi.fields.length : 0} ${unfilledOnly ? "unfilled" : "visible"} field(s).`
-          : chunkedAi.error || "Chunked LLM scan failed.",
-        scan: {
-          ...chunkedScan,
-          unfilledOnly,
-          unfilled_only: unfilledOnly,
-          url: capture.url || tabUrl,
-          requested_url: tabUrl,
-          title: capture.title || "",
-          snapshot_source: capture.snapshot_source || "extension_browser_snapshot",
-          experiment_features: { chunkedOnly: true, unfilledOnly },
-          timings: {
-            dom_capture_ms: domCaptureMs,
-            llm_ms: Date.now() - chunkedStart,
-            total_ms: Date.now() - started
-          }
-        }
-      };
-    }
-    const snapshotScan = parseSnapshotFields({
-      url: capture.url || tabUrl,
-      title: capture.title || "",
-      snapshotText: capture.snapshot_text || ""
-    });
-    if (payload?.snapshotOnly || payload?.snapshot_only) {
-      const totalMs = Date.now() - started;
-      const snapshotFields = Array.isArray(snapshotScan.domFields) ? snapshotScan.domFields : [];
-      return {
-        ok: true,
-        summary: `${snapshotFields.length} visible field(s) are found`,
-        scan: {
-          url: capture.url || tabUrl,
-          requested_url: tabUrl,
-          title: capture.title || "",
-          viewTitle: "Fields To Fill",
-          domOutline: capture.domOutline || "",
-          dom_outline: capture.domOutline || "",
-          snapshot_text: capture.snapshot_text || "",
-          snapshot_source: capture.snapshot_source || "extension_browser_snapshot",
-          controlsCount: snapshotFields.length,
-          domFields: snapshotFields,
-          dom_fields: snapshotFields,
-          fieldCount: 0,
-          fields: [],
-          llmInput: [],
-          stats: {},
-          sources: { snapshot_parser: true, llm_call_count: 0 },
-          parsedFieldScan: formatSnapshotScan(snapshotScan),
-          experiment_features: { snapshotOnly: true, includeChunked: false },
-          chunkedLlmScan: null,
-          timings: {
-            dom_capture_ms: domCaptureMs,
-            llm_ms: 0,
-            total_ms: totalMs
-          }
-        }
-      };
-    }
-    await sendProgress("LLM scan: analyzing fields with LLM...");
-    const llmStart = Date.now();
-    const ai = await analyzeDomFieldScan({
-      url: capture.url || tabUrl,
-      title: capture.title || "",
-      snapshotText: capture.snapshot_text || ""
-    });
-    if (!ai.ok) return { ok: false, error: ai.error || "LLM scan failed." };
-    let chunkedAi = null;
-    if (payload?.includeChunked) {
-      await sendProgress("LLM scan: analyzing structured chunks...");
-      chunkedAi = await analyzeDomFieldScanChunked({
-        url: capture.url || tabUrl,
-        title: capture.title || "",
-        snapshotText: capture.snapshot_text || ""
-      }).catch((error) => ({
-        ok: false,
-        error: error instanceof Error ? error.message : String(error || "Chunked LLM scan failed.")
-      }));
-    }
-    const llmMs = Date.now() - llmStart;
-    const totalMs = Date.now() - started;
-    const domFields = Array.isArray(ai.domFields) ? ai.domFields.slice(0, 120) : [];
+    const rulesMs = Date.now() - started;
     return {
       ok: true,
-      summary: `LLM scan found ${ai.fields.length} visible field(s).`,
+      summary: `${snapshotFields.length} visible field(s) are found`,
+      snapshot,
       scan: {
-        url: capture.url || tabUrl,
-        requested_url: tabUrl,
-        title: capture.title || "",
-        viewTitle: "Fields To Fill (Full LLM)",
-        domOutline: capture.domOutline || "",
-        dom_outline: capture.domOutline || "",
-        snapshot_text: capture.snapshot_text || "",
-        snapshot_source: capture.snapshot_source || "extension_browser_snapshot",
-        controlsCount: domFields.length,
-        domFields,
-        dom_fields: domFields,
-        fieldCount: ai.fields.length,
-        fields: ai.fields,
-        llmInput: Array.isArray(ai.llmInputs) ? ai.llmInputs : [],
-        stats: ai.stats || {},
-        sources: { snapshot: true, llm_call_count: 1 },
-        parsedFieldScan: formatSnapshotScan(snapshotScan),
-        experiment_features: { includeChunked: !!payload?.includeChunked },
-        chunkedLlmScan: chunkedAi ? formatChunkedLlmScan(chunkedAi) : null,
+        url: snapshot.url || "",
+        requested_url: snapshot.requested_url || "",
+        title: snapshot.title || "",
+        viewTitle: "Fields To Fill",
+        domOutline: snapshot.domOutline || "",
+        snapshot_text: snapshot.snapshot_text || "",
+        snapshot_source: snapshot.snapshot_source || "extension_browser_snapshot",
+        parsedFieldScan: normalizedParsedFieldScan,
+        experiment_features: {
+          parseMode: "rules",
+          usedProvidedSnapshot
+        },
         timings: {
-          dom_capture_ms: domCaptureMs,
-          llm_ms: llmMs,
-          total_ms: totalMs
+          dom_capture_ms: Number(snapshot?.timings?.dom_capture_ms || 0),
+          snapshot_capture_ms: Number(snapshot?.timings?.snapshot_capture_ms || 0),
+          rules_ms: Date.now() - started
+        }
+      }
+    };
+  }
+
+  async function handleParseSnapshotLlm(sender, payload = {}) {
+    const started = Date.now();
+    const mode = String(payload?.mode || "chunked").toLowerCase();
+    if (mode !== "chunked") {
+      return { ok: false, error: "SNAPSHOT_PARSE_LLM currently supports only mode='chunked'." };
+    }
+    const unfilledOnly = !!(payload?.unfilledOnly || payload?.unfilled_only);
+    const tabId = Number(payload?.tabId || sender?.tab?.id || 0);
+    const tabUrl = String(payload?.tabUrl || sender?.tab?.url || "");
+    const providedSnapshot = readSnapshotFromPayload(payload, tabUrl);
+    const usedProvidedSnapshot = !!providedSnapshot;
+    let snapshot = providedSnapshot;
+    if (!snapshot) {
+      if (!tabId || !tabUrl) return { ok: false, error: "No active tab context." };
+      const captured = await captureDomThenSnapshot(tabId);
+      if (!captured.ok) return captured;
+      snapshot = {
+        url: String(captured.url || tabUrl || ""),
+        requested_url: tabUrl,
+        title: String(captured.title || ""),
+        domOutline: String(captured.domOutline || ""),
+        snapshot_text: String(captured.snapshot_text || ""),
+        snapshot_source: String(captured.snapshot_source || "extension_browser_snapshot"),
+        timings: captured.timings || {}
+      };
+    }
+    const baseTimings = {
+      dom_capture_ms: Number(snapshot?.timings?.dom_capture_ms || 0),
+      snapshot_capture_ms: Number(snapshot?.timings?.snapshot_capture_ms || 0)
+    };
+
+    const llmStart = Date.now();
+    const chunkedAi = await parseSnapshotFieldsWithLLMChunked({
+      url: snapshot.url || "",
+      title: snapshot.title || "",
+      snapshotText: snapshot.snapshot_text || "",
+      unfilledOnly
+    }).catch((error) => ({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error || "Chunked LLM scan failed.")
+    }));
+    const chunkedScan = {
+      ok: !!chunkedAi?.ok,
+      error: chunkedAi?.error || "",
+      viewTitle: "Fields To Fill (Chunked LLM)",
+      domFields: Array.isArray(chunkedAi?.domFields) ? chunkedAi.domFields : [],
+      fieldCount: Array.isArray(chunkedAi?.domFields) ? chunkedAi.domFields.length : 0,
+      stats: chunkedAi?.stats || {}
+    };
+    return {
+      ok: !!chunkedAi.ok,
+      error: chunkedAi.error || "",
+      summary: chunkedAi.ok
+        ? `Chunked LLM scan found ${Array.isArray(chunkedAi.fields) ? chunkedAi.fields.length : 0} ${unfilledOnly ? "unfilled" : "visible"} field(s).`
+        : chunkedAi.error || "Chunked LLM scan failed.",
+      snapshot,
+      scan: {
+        ...chunkedScan,
+        chunks: Array.isArray(chunkedAi?.chunks) ? chunkedAi.chunks : [],
+        unfilledOnly,
+        unfilled_only: unfilledOnly,
+        url: snapshot.url || "",
+        requested_url: snapshot.requested_url || "",
+        title: snapshot.title || "",
+        domOutline: snapshot.domOutline || "",
+        dom_outline: snapshot.domOutline || "",
+        snapshot_text: snapshot.snapshot_text || "",
+        snapshot_source: snapshot.snapshot_source || "extension_browser_snapshot",
+        experiment_features: {
+          parseMode: "llm_chunked",
+          usedProvidedSnapshot,
+          unfilledOnly
+        },
+        timings: {
+          ...baseTimings,
+          llm_ms: Date.now() - llmStart,
+          total_ms: Date.now() - started
         }
       }
     };
@@ -1594,6 +1805,7 @@ export function createFloatingBarHandlers(deps) {
     handleFloatingBarFill,
     handleFloatingBarTrustedDropdown,
     handleFloatingBarClear,
-    handleFloatingBarFieldScan
+    handleParseSnapshotRules,
+    handleParseSnapshotLlm
   };
 }

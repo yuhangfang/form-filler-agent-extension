@@ -39,6 +39,7 @@
           <button type="button" class="tab-button" data-tab="domTab">Snapshot DOM Material</button>
           <button type="button" class="tab-button" data-tab="playwrightTab">Browser Snapshot</button>
           <button type="button" class="tab-button is-active" data-tab="fieldScanTab">Field Scan</button>
+          <button type="button" class="tab-button" data-tab="diagnoseTab">Diagnose</button>
         </div>
 
         <div class="tab-panel" id="domTab">
@@ -63,6 +64,33 @@
                 <button id="runChunkedLlm" class="secondary-small" type="button" disabled>Run Chunked LLM</button>
               </div>
               <div id="chunkedLlmScanOutput" class="wr-llm-output-host"></div>
+            </section>
+          </div>
+        </div>
+        <div class="tab-panel" id="diagnoseTab">
+          <div class="pane-heading">
+            <h3>Diagnose Workspace</h3>
+            <button id="runDiagnoseRound" class="secondary-small" type="button" disabled>Run Diagnose Round</button>
+          </div>
+          <div class="diagnose-grid">
+            <section class="diagnose-pane">
+              <h4>LLM Context (this round)</h4>
+              <pre id="diagnoseContextOutput"></pre>
+            </section>
+            <section class="diagnose-pane">
+              <h4>Vision Input (this round)</h4>
+              <div id="diagnoseScreenshotOutput" class="screenshot-host"></div>
+            </section>
+            <section class="diagnose-pane">
+              <h4>Diagnose Chat</h4>
+              <div id="diagnoseChatLog" class="diagnose-chat-log"></div>
+              <div class="row diagnose-chat-input">
+                <textarea id="diagnoseChatInput" placeholder="Ask follow-up to direct the next diagnose move..."></textarea>
+              </div>
+              <div class="row">
+                <button id="sendDiagnoseChat" class="secondary-small" type="button" disabled>Send</button>
+                <button id="clearDiagnoseChat" class="secondary-small" type="button">Clear Chat</button>
+              </div>
             </section>
           </div>
         </div>

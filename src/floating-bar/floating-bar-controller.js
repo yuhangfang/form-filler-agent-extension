@@ -630,13 +630,16 @@ function initFloatingBar() {
   async function refreshSnapshotFields() {
     setFloatingBarBusy(true);
     statusEl.textContent = "Loading snapshot fields...";
-    const res = await runtimeSendMessageAsync({
-      type: "FLOATING_BAR_FIELD_SCAN",
-      payload: { snapshotOnly: true, includeChunked: false }
-    });
+    const captured = await runtimeSendMessageAsync({ type: "SNAPSHOT_CAPTURE", payload: {} });
+    const res = captured?.ok
+      ? await runtimeSendMessageAsync({
+          type: "SNAPSHOT_PARSE_RULES",
+          payload: { snapshot: captured.snapshot || {} }
+        })
+      : captured;
     const snapshotParserScan = getParsedFieldScan(res);
-    const fields = Array.isArray(snapshotParserScan?.domFields || snapshotParserScan?.dom_fields)
-      ? (snapshotParserScan?.domFields || snapshotParserScan?.dom_fields)
+    const fields = Array.isArray(snapshotParserScan?.domFields)
+      ? snapshotParserScan.domFields
       : [];
     snapshotCards.fields = fields;
     if (fields.length > 0) _barHasScannedFields = true;

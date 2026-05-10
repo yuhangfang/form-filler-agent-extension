@@ -241,7 +241,7 @@
     }
 
     const scan = scanView.scan || {};
-    const fields = Array.isArray(scan.fields) ? scan.fields : [];
+    const fields = Array.isArray(scan.domFields) ? scan.domFields : [];
 
     const title = document.createElement("h3");
     title.className = "reader-pane-title";

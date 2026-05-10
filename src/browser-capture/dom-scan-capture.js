@@ -1,42 +1,8 @@
-import { handleBrowserMcp } from "./browser-mcp-background.js";
+import { runBrowserMcpTool } from "./browser-mcp-background.js";
 
-export function formatSnapshotScan(snapshotScan) {
-  return {
-    ok: !!snapshotScan?.ok,
-    error: snapshotScan?.error || "",
-    viewTitle: "Fields To Fill",
-    controlsCount: Array.isArray(snapshotScan?.domFields) ? snapshotScan.domFields.length : 0,
-    domFields: Array.isArray(snapshotScan?.domFields) ? snapshotScan.domFields : [],
-    dom_fields: Array.isArray(snapshotScan?.domFields) ? snapshotScan.domFields : [],
-    fieldCount: Array.isArray(snapshotScan?.fields) ? snapshotScan.fields.length : 0,
-    fields: Array.isArray(snapshotScan?.fields) ? snapshotScan.fields : [],
-    stats: snapshotScan?.stats || {},
-    sources: { snapshot_parser: true, llm_call_count: 0 }
-  };
-}
-
-export function formatChunkedLlmScan(chunkedAi) {
-  return {
-    ok: !!chunkedAi?.ok,
-    error: chunkedAi?.error || "",
-    viewTitle: "Fields To Fill (Chunked LLM)",
-    chunks: chunkedAi?.chunks || [],
-    controlsCount: Array.isArray(chunkedAi?.domFields) ? chunkedAi.domFields.length : 0,
-    domFields: Array.isArray(chunkedAi?.domFields) ? chunkedAi.domFields : [],
-    dom_fields: Array.isArray(chunkedAi?.domFields) ? chunkedAi.domFields : [],
-    fieldCount: Array.isArray(chunkedAi?.fields) ? chunkedAi.fields.length : 0,
-    fields: Array.isArray(chunkedAi?.fields) ? chunkedAi.fields : [],
-    llmInput: Array.isArray(chunkedAi?.llmInputs) ? chunkedAi.llmInputs : [],
-    stats: chunkedAi?.stats || {},
-    sources: { snapshot_chunks: true, llm_call_count: Number(chunkedAi?.stats?.llm_call_count || 0) }
-  };
-}
-
-/**
- * Live DOM tree + browser_snapshot text for field scan / profile sync. Uses the MCP-style snapshot helper.
- */
-export async function captureScanDom(tabId) {
+export async function captureDomOutline(tabId) {
   try {
+    const started = Date.now();
     const rows = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
@@ -134,22 +100,42 @@ export async function captureScanDom(tabId) {
     });
     const result = rows?.[0]?.result;
     if (!result) return { ok: false, error: "Could not capture DOM from page." };
-    const snapshot = await handleBrowserMcp(
-      {
-        tool: "browser_snapshot",
-        payload: { boxes: false, highlightRefs: false },
-        tabId
-      },
-      {}
-    ).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return {
       ok: true,
       ...result,
-      snapshot_text: snapshot?.ok ? String(snapshot.snapshot || "").slice(0, 200000) : "",
-      snapshot_source: snapshot?.ok ? "extension_browser_snapshot" : "dom_excerpt_fallback",
-      snapshot_error: snapshot?.ok ? "" : String(snapshot?.error || "")
+      timings: { dom_capture_ms: Date.now() - started }
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "DOM capture failed." };
   }
 }
+
+export async function captureDomThenSnapshot(tabId) {
+  const started = Date.now();
+  const dom = await captureDomOutline(tabId);
+  if (!dom.ok) return dom;
+  const snapshotStarted = Date.now();
+  const snapshotResult = await runBrowserMcpTool(
+    {
+      tool: "browser_snapshot",
+      payload: { boxes: false, highlightRefs: false },
+      tabId
+    },
+    {}
+  ).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+  return {
+    ok: true,
+    url: dom.url || "",
+    title: dom.title || "",
+    domOutline: dom.domOutline || "",
+    snapshot_text: snapshotResult?.ok ? String(snapshotResult.snapshot || "").slice(0, 200000) : "",
+    snapshot_source: snapshotResult?.ok ? "extension_browser_snapshot" : "dom_excerpt_fallback",
+    snapshot_error: snapshotResult?.ok ? "" : String(snapshotResult?.error || ""),
+    timings: {
+      dom_capture_ms: Number(dom?.timings?.dom_capture_ms || 0),
+      snapshot_capture_ms: Date.now() - snapshotStarted,
+      total_ms: Date.now() - started
+    }
+  };
+}
+

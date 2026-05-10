@@ -1,7 +1,7 @@
 import { BROWSER_TOOLS_INJECT_CHAIN } from "./browser-tools-inject-chain.js";
 
 /** Playwright MCP–compatible surface (browser_navigate, tabs, screenshot, relay to content tools). */
-export async function handleBrowserMcp(message, sender) {
+export async function runBrowserMcpTool(message, sender) {
   const tool = message.tool;
   const payload = message.payload || {};
   const tabId = message.tabId ?? sender?.tab?.id;
@@ -76,10 +76,13 @@ export async function handleBrowserMcp(message, sender) {
 
   if (tool === "browser_take_screenshot") {
     if (tabId == null) return { ok: false, error: "Missing tabId for screenshot." };
+    let hideState = null;
     try {
       const tab = await chrome.tabs.get(tabId);
       const format = payload?.type === "jpeg" ? "jpeg" : "png";
-      if (payload?.fullPage || payload?.full_page) {
+      const wantFullPage = payload?.fullPage !== false && payload?.full_page !== false;
+      hideState = await hideExtensionUiForScreenshot(tab.id);
+      if (wantFullPage) {
         const full = await captureFullPageScreenshotWithDebugger(tab.id, format);
         if (full.ok) return full;
         // Fallback: some pages reject CDP screenshot with errors like
@@ -102,6 +105,8 @@ export async function handleBrowserMcp(message, sender) {
         ok: false,
         error: e instanceof Error ? e.message : "captureVisibleTab failed"
       };
+    } finally {
+      await restoreExtensionUiAfterScreenshot(tabId, hideState);
     }
   }
 
@@ -229,4 +234,59 @@ async function handleBrowserTabs(payload, senderTabId) {
   }
 
   return { ok: false, error: `Unknown browser_tabs action: ${action}` };
+}
+
+async function hideExtensionUiForScreenshot(tabId) {
+  try {
+    const rows = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        const selectors = [
+          "#form-filler-floating-root",
+          "#form-filler-floating-restore",
+          "#ff-textbox-assist"
+        ];
+        let hiddenCount = 0;
+        for (const selector of selectors) {
+          const nodes = document.querySelectorAll(selector);
+          for (const el of nodes) {
+            if (!(el instanceof HTMLElement)) continue;
+            if (el.dataset.ffScreenshotHidden === "1") continue;
+            const prevStyleAttr = el.getAttribute("style");
+            el.dataset.ffScreenshotHidden = "1";
+            el.dataset.ffScreenshotPrevStyle = prevStyleAttr == null ? "__NONE__" : prevStyleAttr;
+            el.style.setProperty("display", "none", "important");
+            hiddenCount += 1;
+          }
+        }
+        return { hiddenCount };
+      }
+    });
+    const hiddenCount = (rows || []).reduce((sum, row) => sum + Number(row?.result?.hiddenCount || 0), 0);
+    return { ok: true, hiddenCount };
+  } catch {
+    return { ok: false, hiddenCount: 0 };
+  }
+}
+
+async function restoreExtensionUiAfterScreenshot(tabId, hideState) {
+  if (!hideState?.ok || !hideState?.hiddenCount) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        const nodes = document.querySelectorAll("[data-ff-screenshot-hidden='1']");
+        for (const el of nodes) {
+          if (!(el instanceof HTMLElement)) continue;
+          const prev = el.dataset.ffScreenshotPrevStyle;
+          if (prev === "__NONE__") el.removeAttribute("style");
+          else if (typeof prev === "string") el.setAttribute("style", prev);
+          delete el.dataset.ffScreenshotHidden;
+          delete el.dataset.ffScreenshotPrevStyle;
+        }
+      }
+    });
+  } catch {
+    // best-effort restore
+  }
 }

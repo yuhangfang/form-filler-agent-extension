@@ -1,14 +1,15 @@
 import { assistLargeTextboxText } from "./floating-bar/large-textbox-assist.js";
 import { createFloatingBarHandlers } from "./floating-bar/floating-bar-background-handlers.js";
 import { parseSnapshotFields } from "./field-extraction/snapshot-field-parser.js";
+import { diagnoseFieldsAgainstScreenshot } from "./field-extraction/vision-fill-diagnosis.js";
 import { analyzeSiteObservations } from "./field-learning/site-observation-ai.js";
 import { batchGuessFormFields, runFieldPlannerStream } from "./field-guessing/field-value-guesser.js";
 import "./field-guessing/profile-field-catalog.js";
 import { simplifyFieldHintsForStorage } from "./field-guessing/field-hint-normalizer.js";
 import { applyTrustedDropdownGuesses } from "./field-filling/trusted-dropdown-fill.js";
 import { getAxFieldMap } from "./browser-capture/ax-snapshot.js";
-import { captureScanDom } from "./browser-capture/dom-scan-capture.js";
-import { handleBrowserMcp } from "./browser-capture/browser-mcp-background.js";
+import { captureDomThenSnapshot } from "./browser-capture/dom-scan-capture.js";
+import { runBrowserMcpTool } from "./browser-capture/browser-mcp-background.js";
 import {
   KEYS,
   getFieldHint,
@@ -674,7 +675,8 @@ const {
   handleFloatingBarFill,
   handleFloatingBarTrustedDropdown,
   handleFloatingBarClear,
-  handleFloatingBarFieldScan
+  handleParseSnapshotRules,
+  handleParseSnapshotLlm
 } = createFloatingBarHandlers({
   applyTrustedDropdownGuesses,
   getProfileForFill,
@@ -827,20 +829,97 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "FLOATING_BAR_FIELD_SCAN") {
-    handleFloatingBarFieldScan(sender, message.payload || {})
+  if (message?.type === "SNAPSHOT_CAPTURE") {
+    (async () => {
+      const tabId = Number(message?.payload?.tabId || sender?.tab?.id || 0);
+      const tabUrl = String(message?.payload?.tabUrl || sender?.tab?.url || "");
+      if (!tabId || !tabUrl) return { ok: false, error: "No active tab context." };
+      const captured = await captureDomThenSnapshot(tabId);
+      if (!captured?.ok) return captured || { ok: false, error: "Snapshot capture failed." };
+      return {
+        ok: true,
+        summary: "Snapshot captured.",
+        snapshot: {
+          url: String(captured.url || tabUrl || ""),
+          requested_url: tabUrl,
+          title: String(captured.title || ""),
+          domOutline: String(captured.domOutline || ""),
+          dom_outline: String(captured.domOutline || ""),
+          snapshot_text: String(captured.snapshot_text || ""),
+          snapshot_source: String(captured.snapshot_source || "extension_browser_snapshot"),
+          timings: captured.timings || {}
+        }
+      };
+    })()
+      .then((result) =>
+        sendResponse(result)
+      )
+      .catch((error) =>
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Snapshot capture failed"
+        })
+      );
+    return true;
+  }
+
+  if (message?.type === "SNAPSHOT_PARSE_RULES") {
+    handleParseSnapshotRules(sender, message.payload || {})
       .then((result) => sendResponse(result))
       .catch((error) =>
         sendResponse({
           ok: false,
-          error: error instanceof Error ? error.message : "Floating LLM scan failed"
+          error: error instanceof Error ? error.message : "Snapshot rules parse failed"
+        })
+      );
+    return true;
+  }
+
+  if (message?.type === "SNAPSHOT_PARSE_LLM") {
+    handleParseSnapshotLlm(sender, message.payload || {})
+      .then((result) => sendResponse(result))
+      .catch((error) =>
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Snapshot LLM parse failed"
+        })
+      );
+    return true;
+  }
+
+  if (message?.type === "EXPERIMENT_RUNNER_DIAGNOSE_ROUND") {
+    (async () => {
+      const tabId = Number(message?.payload?.tabId || 0);
+      const tab = tabId ? await chrome.tabs.get(tabId).catch(() => null) : null;
+      const tabUrl = String(message?.payload?.tabUrl || tab?.url || "");
+      const title = String(message?.payload?.title || tab?.title || "");
+      const screenshotDataUrl = String(message?.payload?.screenshotDataUrl || "");
+      const extractedFields = Array.isArray(message?.payload?.extractedFields) ? message.payload.extractedFields : [];
+      if (!tabUrl) return { ok: false, error: "tabUrl is required." };
+      if (!screenshotDataUrl) return { ok: false, error: "screenshotDataUrl is required." };
+      if (!extractedFields.length) return { ok: false, error: "extractedFields is required." };
+      const result = await diagnoseFieldsAgainstScreenshot({
+        url: tabUrl,
+        title,
+        screenshotDataUrl,
+        extractedFields,
+        operatorMessage: String(message?.payload?.userMessage || ""),
+        chatHistory: Array.isArray(message?.payload?.chatHistory) ? message.payload.chatHistory : []
+      });
+      return result;
+    })()
+      .then((result) => sendResponse(result))
+      .catch((error) =>
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Experiment diagnose round failed"
         })
       );
     return true;
   }
 
   if (message?.type === "BROWSER_MCP") {
-    handleBrowserMcp(message, sender)
+    runBrowserMcpTool(message, sender)
       .then((result) => sendResponse(result))
       .catch((error) =>
         sendResponse({
@@ -989,7 +1068,7 @@ async function handleProfileFieldChanged(sender, payload = {}) {
   if (!tabId || !changedValue) return { ok: true, updated: false, reason: "missing_tab_or_value" };
 
   let snapshotFields = [];
-  const capture = await captureScanDom(tabId).catch(() => null);
+  const capture = await captureDomThenSnapshot(tabId).catch(() => null);
   if (capture?.ok && capture.snapshot_text) {
     const parsed = parseSnapshotFields({
       url: capture.url || payload.url || "",
