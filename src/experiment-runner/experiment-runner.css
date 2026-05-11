@@ -49,9 +49,39 @@ textarea {
 
 .diagnose-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+}
+
+.diagnose-inner-tab-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.diagnose-inner-tab {
+  border: 1px solid #3d4f8f;
+  background: #1b274f;
+  color: #dce6ff;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.diagnose-inner-tab.is-active {
+  background: #2f4cb0;
+  border-color: #5d79dc;
+  color: #ffffff;
+}
+
+.diagnose-inner-panel {
+  display: none;
+}
+
+.diagnose-inner-panel.is-active {
+  display: block;
 }
 
 .diagnose-pane {
@@ -89,6 +119,11 @@ textarea {
   margin-bottom: 0;
 }
 
+.diagnose-chat-assistant {
+  background: #0d1a30;
+  border-color: #1e3a5f;
+}
+
 .diagnose-chat-item strong {
   display: block;
   margin-bottom: 4px;
@@ -99,6 +134,40 @@ textarea {
 .diagnose-chat-input textarea {
   min-height: 88px;
   margin-top: 0;
+}
+
+.diagnose-context-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.ctx-chips-label {
+  font-size: 11px;
+  color: #7a8fc0;
+  white-space: nowrap;
+}
+
+.ctx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #dce6ff;
+  background: #1b274f;
+  border: 1px solid #3d4f8f;
+  border-radius: 12px;
+  padding: 3px 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ctx-chip input[type="checkbox"] {
+  margin: 0;
+  accent-color: #5d79dc;
+  cursor: pointer;
 }
 
 .row {
@@ -256,4 +325,245 @@ pre {
   padding: 10px;
   min-height: 72px;
   font-size: 12px;
+}
+
+/* Source search (inside right diagnose pane) */
+.source-search-section {
+  margin-top: 14px;
+  border-top: 1px solid #2a3766;
+  padding-top: 10px;
+}
+
+.source-search-section h4 {
+  margin: 0 0 4px;
+  color: #afbbe8;
+  font-size: 13px;
+}
+
+.source-search-legend {
+  margin: 0 0 10px;
+  color: #7a8fc0;
+  font-size: 11px;
+}
+
+.source-search-none {
+  color: #a9ffd9;
+  font-size: 12px;
+  margin: 0;
+}
+
+#sourceSearchOutput {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.source-search-card {
+  background: #0f1630;
+  border: 1px solid #293768;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.source-search-field {
+  font-size: 12px;
+  font-weight: 600;
+  color: #dbe7ff;
+  margin-bottom: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.source-search-row {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.source-search-found {
+  color: #4ade80;
+  font-weight: 500;
+}
+
+.source-search-missing {
+  color: #f87171;
+  font-weight: 500;
+}
+
+.source-search-match-type {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.source-search-snippet {
+  margin-top: 3px;
+  margin-left: 14px;
+  color: #7a8fc0;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Step 1 — Missing field cards */
+#diagnoseStep1Output {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.step1-field-card {
+  background: #0f1630;
+  border: 1px solid #293768;
+  border-left: 3px solid #5d79dc;
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+
+.step1-field-label {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #dbe7ff;
+  font-weight: 500;
+}
+
+.step1-status-waiting {
+  font-size: 12px;
+  color: #7a8fc0;
+  font-style: italic;
+  margin: 0;
+}
+
+.step1-status-error {
+  font-size: 12px;
+  color: #f87171;
+  margin: 0;
+}
+
+/* Step 2 — Code gap analysis tabs + panels */
+.step2-tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.step2-tab {
+  border: 1px solid #3d4f8f;
+  background: #1b274f;
+  color: #dce6ff;
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step2-tab.is-active {
+  background: #2f4cb0;
+  border-color: #5d79dc;
+  color: #ffffff;
+}
+
+.step2-panel {
+  display: none;
+}
+
+.step2-panel.is-active {
+  display: block;
+}
+
+/* Step 2 — Code gap analysis cards */
+.step2-card {
+  background: #0f1630;
+  border: 1px solid #293768;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.step2-field-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #dbe7ff;
+  margin-bottom: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.step2-analysis {
+  font-size: 12px;
+  color: #b8c7ef;
+  line-height: 1.6;
+}
+
+.step2-analyzing {
+  color: #7a8fc0;
+  font-style: italic;
+}
+
+.step2-error {
+  color: #f87171;
+  font-style: normal;
+}
+
+.step2-line-heading {
+  font-weight: 600;
+  color: #dbe7ff;
+  margin: 8px 0 4px;
+  font-size: 12px;
+}
+
+.step2-line-bullet {
+  padding-left: 14px;
+  position: relative;
+  color: #b8c7ef;
+}
+
+.step2-line-bullet::before {
+  content: "•";
+  position: absolute;
+  left: 4px;
+  color: #5d79dc;
+}
+
+.step2-line-body {
+  color: #b8c7ef;
+}
+
+.step2-line-gap {
+  height: 6px;
+}
+
+.step2-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #1e2d5a;
+}
+
+.step2-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5d79dc;
+  margin-bottom: 6px;
+}
+
+.step2-source-row {
+  margin-top: 5px;
+  font-size: 12px;
+}
+
+.step2-source-snippet {
+  margin: 4px 0 0 14px;
+  padding: 6px 8px;
+  background: #080e22;
+  border: 1px solid #1e2d5a;
+  border-radius: 5px;
+  font-size: 11px;
+  color: #7a8fc0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }

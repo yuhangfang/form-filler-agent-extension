@@ -19,6 +19,7 @@ function roleToFieldType(role) {
   if (role === "switch") return "checkbox";
   return {
     textbox: "text",
+    button: "button",
     combobox: "select",
     listbox: "select",
     checkbox: "checkbox",
@@ -29,7 +30,7 @@ function roleToFieldType(role) {
 }
 
 function snapshotRoleLine(line) {
-  const match = /^(\s*)-\s+(textbox|searchbox|combobox|listbox|spinbutton|checkbox|radio|switch|slider|group|radiogroup)\b\s*(.*)$/i.exec(line);
+  const match = /^(\s*)-\s+(textbox|searchbox|combobox|listbox|spinbutton|checkbox|radio|switch|slider|group|radiogroup|button)\b\s*(.*)$/i.exec(line);
   if (!match) return null;
   const suffix = String(match[3] || "").replace(/:\s*$/, "");
   const quoted = /"((?:\\.|[^"\\])*)"/.exec(suffix);
@@ -40,7 +41,8 @@ function snapshotRoleLine(line) {
     role: match[2].toLowerCase(),
     label: name,
     ref: ref ? ref[1] : "",
-    checked: /\[checked\]/.test(suffix)
+    checked: /\[checked\]/.test(suffix),
+    text: normalizeSpaces(suffix)
   };
 }
 
@@ -87,7 +89,7 @@ function snapshotListItem(line) {
   if (!match) return null;
   if (/^\/[a-z-]+:/i.test(match[2])) return null;
   if (/^text:/i.test(match[2])) return null;
-  if (/^(textbox|searchbox|combobox|listbox|spinbutton|checkbox|radio|switch|slider|group|radiogroup)\b/i.test(match[2])) return null;
+  if (/^(textbox|searchbox|combobox|listbox|spinbutton|checkbox|radio|switch|slider|group|radiogroup|button)\b/i.test(match[2])) return null;
   return { indent: match[1].length, value: unquoteSnapshotString(match[2]) };
 }
 
@@ -126,9 +128,29 @@ function isQuestionLikeLabel(label) {
 }
 
 function isActionButtonLabel(label) {
-  return /^(?:back|previous|prev|next|continue|save(?: and continue)?|submit|cancel|close|done|finish|review|search for jobs|candidate home|job alerts)$/i.test(
-    normalizeSpaces(label)
-  );
+  const text = normalizeSpaces(label);
+  if (!text) return false;
+  if (/^(?:back|previous|prev|next|continue|cancel|close|done|finish)$/i.test(text)) return true;
+  if (/^(?:back|previous|prev|next|continue)\b/i.test(text)) return true;
+  if (/^(?:submit|send|apply|finish|review)\b/i.test(text)) return true;
+  if (/^save(?:\s*(?:&|and)\s*(?:continue|next|exit|close|return))?\b/i.test(text)) return true;
+  return /^(?:search for jobs|candidate home|job alerts)$/i.test(text);
+}
+
+function isLikelyFieldButtonText(buttonText, contextText = "") {
+  const text = normalizeSpaces([buttonText, contextText].filter(Boolean).join(" "));
+  if (!text || isActionButtonLabel(buttonText)) return false;
+  if (isUploadFieldText(text)) return true;
+  return /\b(?:resume|cv)\b/i.test(text) && /\b(?:upload|autofill|attach|browse|select file)\b/i.test(text);
+}
+
+function deriveFieldButtonLabel(buttonLabel, contextLabel = "") {
+  const ctx = normalizeSpaces(contextLabel);
+  const label = normalizeSpaces(buttonLabel);
+  if (ctx && /\b(?:resume|cv)\b/i.test(ctx)) return ctx;
+  if (/^(?:resume|cv)[*✱]?$/i.test(label)) return label;
+  if (/\b(?:resume|cv)\b/i.test(label)) return "Resume";
+  return label;
 }
 
 function isLikelySelectButtonLabel(buttonLabel, contextLabel) {
@@ -155,7 +177,7 @@ function deriveSelectButtonLabel(buttonLabel, contextLabel) {
   const ctx = cleanFieldLabel(contextLabel);
   const label = normalizeSpaces(buttonLabel);
   if (ctx && label.toLowerCase().startsWith(ctx.toLowerCase())) return ctx;
-  return cleanFieldLabel(label.replace(/\b(?:select one|required)\b.*$/i, ""));
+  return cleanFieldLabel(label.replace(/\b(?:select one|required)\b.*$/i, "")) || ctx;
 }
 
 function shouldGroupCheckboxUnderParent(parent, childLabel) {
@@ -346,6 +368,49 @@ export function parseSnapshotFields({ url = "", title = "", snapshotText = "" } 
       ) {
         field.label = cleanFieldLabel(ctx.text);
       }
+      if (role.role === "button") {
+        const rawButtonText = [field.label, role.text].filter(Boolean).join(" ");
+        if (isExpandableAddButtonLabel(field.label, parent?.label || ctx?.text || "")) {
+          const sectionLabel = cleanFieldLabel(parent?.label || ctx?.text || "");
+          const expandField = {
+            label: cleanFieldLabel(`${sectionLabel ? `${sectionLabel} ` : ""}${field.label}`),
+            type: "expandButton",
+            name: "",
+            id: role.ref,
+            required: false,
+            options: [],
+            optionGroups: [],
+            needsExpansion: true,
+            expansionReason: "expandable add button"
+          };
+          fields.push(expandField);
+          stack.push({ indent: role.indent, field: expandField });
+          continue;
+        }
+        if (isLikelySelectButtonLabel(field.label, ctx?.text || "")) {
+          const selectField = {
+            label: groupedFieldLabel(deriveSelectButtonLabel(field.label, ctx?.text || ""), currentField()),
+            type: "select",
+            name: "",
+            id: role.ref,
+            required: /\brequired\b/i.test(field.label) || /[✱*]/.test(field.label) || /[✱*]/.test(ctx?.text || ""),
+            options: [],
+            optionGroups: [],
+            needsExpansion: false,
+            expansionReason: ""
+          };
+          if (selectField.label || role.ref) fields.push(selectField);
+          stack.push({ indent: role.indent, field: selectField });
+          continue;
+        }
+        const buttonLabel = deriveFieldButtonLabel(field.label, ctx?.text || "");
+        if (!isLikelyFieldButtonText(rawButtonText, ctx?.text || "")) {
+          stack.push({ indent: role.indent, field: parent });
+          continue;
+        }
+        field.label = buttonLabel;
+        field.required = field.required || /[✱*]/.test(ctx?.text || "");
+      }
       if (
         ["textbox", "searchbox", "spinbutton", "slider"].includes(role.role) &&
         ctx?.text &&
@@ -362,7 +427,7 @@ export function parseSnapshotFields({ url = "", title = "", snapshotText = "" } 
       ) {
         field.label = cleanFieldLabel(`${ctx.text} ${field.label}`);
       }
-      if (!isGroup) field.label = groupedFieldLabel(field.label, parent);
+      if (!isGroup && role.role !== "button") field.label = groupedFieldLabel(field.label, parent);
       if (field.label || role.ref) fields.push(field);
       stack.push({ indent: role.indent, field });
       continue;

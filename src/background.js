@@ -1,7 +1,9 @@
 import { assistLargeTextboxText } from "./floating-bar/large-textbox-assist.js";
 import { createFloatingBarHandlers } from "./floating-bar/floating-bar-background-handlers.js";
 import { parseSnapshotFields } from "./field-extraction/snapshot-field-parser.js";
-import { diagnoseFieldsAgainstScreenshot } from "./field-extraction/vision-fill-diagnosis.js";
+import { diagnoseFieldsAgainstScreenshot, runDiagnoseChat } from "./field-extraction/vision-fill-diagnosis.js";
+import { searchMissingFieldsInSources } from "./field-extraction/source-search.js";
+import { diagnoseCodeForMissingFields } from "./field-extraction/code-source-diagnosis.js";
 import { analyzeSiteObservations } from "./field-learning/site-observation-ai.js";
 import { batchGuessFormFields, runFieldPlannerStream } from "./field-guessing/field-value-guesser.js";
 import "./field-guessing/profile-field-catalog.js";
@@ -892,20 +894,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tabId = Number(message?.payload?.tabId || 0);
       const tab = tabId ? await chrome.tabs.get(tabId).catch(() => null) : null;
       const tabUrl = String(message?.payload?.tabUrl || tab?.url || "");
-      const title = String(message?.payload?.title || tab?.title || "");
       const screenshotDataUrl = String(message?.payload?.screenshotDataUrl || "");
       const extractedFields = Array.isArray(message?.payload?.extractedFields) ? message.payload.extractedFields : [];
+      const snapshotText = String(message?.payload?.snapshotText || "");
+      const domOutline = String(message?.payload?.domOutline || "");
       if (!tabUrl) return { ok: false, error: "tabUrl is required." };
-      if (!screenshotDataUrl) return { ok: false, error: "screenshotDataUrl is required." };
-      if (!extractedFields.length) return { ok: false, error: "extractedFields is required." };
       const result = await diagnoseFieldsAgainstScreenshot({
-        url: tabUrl,
-        title,
         screenshotDataUrl,
-        extractedFields,
-        operatorMessage: String(message?.payload?.userMessage || ""),
-        chatHistory: Array.isArray(message?.payload?.chatHistory) ? message.payload.chatHistory : []
+        extractedFields
       });
+      if (result.ok && Array.isArray(result.diagnosis?.missingFields) && result.diagnosis.missingFields.length > 0) {
+        const sourceSearchResults = searchMissingFieldsInSources({
+          missingFields: result.diagnosis.missingFields,
+          snapshotText,
+          domOutline
+        });
+        result.sourceSearchResults = sourceSearchResults;
+      }
       return result;
     })()
       .then((result) => sendResponse(result))
@@ -915,6 +920,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           error: error instanceof Error ? error.message : "Experiment diagnose round failed"
         })
       );
+    return true;
+  }
+
+  if (message?.type === "EXPERIMENT_RUNNER_DIAGNOSE_STEP2") {
+    (async () => {
+      const sourceSearchResults = Array.isArray(message?.payload?.sourceSearchResults)
+        ? message.payload.sourceSearchResults
+        : [];
+      if (!sourceSearchResults.length) return { ok: false, error: "No source-search results provided." };
+      return await diagnoseCodeForMissingFields({ sourceSearchResults });
+    })()
+      .then((result) => sendResponse(result))
+      .catch((error) =>
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Step 2 diagnosis failed"
+        })
+      );
+    return true;
+  }
+
+  if (message?.type === "EXPERIMENT_RUNNER_DIAGNOSE_CHAT") {
+    (async () => {
+      return await runDiagnoseChat({
+        screenshotDataUrl: String(message?.payload?.screenshotDataUrl || ""),
+        extractedFields: Array.isArray(message?.payload?.extractedFields) ? message.payload.extractedFields : [],
+        snapshotText: String(message?.payload?.snapshotText || ""),
+        domOutline: String(message?.payload?.domOutline || ""),
+        step2Briefs: String(message?.payload?.step2Briefs || ""),
+        userMessage: String(message?.payload?.userMessage || ""),
+        chatHistory: Array.isArray(message?.payload?.chatHistory) ? message.payload.chatHistory : []
+      });
+    })()
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : "Diagnose chat failed" }));
     return true;
   }
 

@@ -68,22 +68,45 @@
           </div>
         </div>
         <div class="tab-panel" id="diagnoseTab">
-          <div class="pane-heading">
-            <h3>Diagnose Workspace</h3>
-            <button id="runDiagnoseRound" class="secondary-small" type="button" disabled>Run Diagnose Round</button>
-          </div>
+          <h3>Diagnose Workspace</h3>
           <div class="diagnose-grid">
             <section class="diagnose-pane">
-              <h4>LLM Context (this round)</h4>
-              <pre id="diagnoseContextOutput"></pre>
+              <div class="diagnose-inner-tab-row">
+                <button type="button" class="diagnose-inner-tab is-active" data-dtab="diagnoseContextPanel">Extracted Fields</button>
+                <button type="button" class="diagnose-inner-tab" data-dtab="diagnoseScreenshotPanel">Screenshot</button>
+              </div>
+              <div class="diagnose-inner-panel is-active" id="diagnoseContextPanel">
+                <pre id="diagnoseContextOutput"></pre>
+              </div>
+              <div class="diagnose-inner-panel" id="diagnoseScreenshotPanel">
+                <div id="diagnoseScreenshotOutput" class="screenshot-host"></div>
+              </div>
             </section>
             <section class="diagnose-pane">
-              <h4>Vision Input (this round)</h4>
-              <div id="diagnoseScreenshotOutput" class="screenshot-host"></div>
-            </section>
-            <section class="diagnose-pane">
+              <div class="source-search-section">
+                <h4>Step 1 — Diagnose Results</h4>
+                <p class="source-search-legend">LLM analysis of extracted fields vs. screenshot.</p>
+                <div id="diagnoseStep1Output"></div>
+              </div>
+              <div class="source-search-section">
+                <h4>Step 2 — Code Gap Analysis</h4>
+                <p class="source-search-legend">
+                  Runs automatically after Step 1 when missing fields are found. Reads the extractor source code and
+                  identifies the parsing rule or interaction gap causing each miss.
+                </p>
+                <div id="diagnoseStep2Tabs" class="step2-tab-row"></div>
+                <div id="diagnoseStep2Output"></div>
+              </div>
               <h4>Diagnose Chat</h4>
               <div id="diagnoseChatLog" class="diagnose-chat-log"></div>
+              <div class="diagnose-context-chips">
+                <span class="ctx-chips-label">Chat context (opt-in):</span>
+                <label class="ctx-chip"><input type="checkbox" id="ctxScreenshot"> Screenshot</label>
+                <label class="ctx-chip"><input type="checkbox" id="ctxFields"> Fields</label>
+                <label class="ctx-chip"><input type="checkbox" id="ctxSnapshot"> Snapshot</label>
+                <label class="ctx-chip"><input type="checkbox" id="ctxDomOutline"> DOM Outline</label>
+              </div>
+              <div id="ctxStep2Fields" class="diagnose-context-chips"></div>
               <div class="row diagnose-chat-input">
                 <textarea id="diagnoseChatInput" placeholder="Ask follow-up to direct the next diagnose move..."></textarea>
               </div>

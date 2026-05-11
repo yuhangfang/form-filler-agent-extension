@@ -750,7 +750,7 @@ function initFloatingBar() {
     const refMap = globalThis.__browserToolRefs;
     const candidates = Array.from(
       document.querySelectorAll(
-        "input, textarea, select, button, [role='textbox'], [role='searchbox'], [role='combobox'], [role='listbox'], [role='spinbutton'], [role='checkbox'], [role='radio'], [role='switch'], [aria-haspopup='listbox']"
+        "input, textarea, select, button, [role='button'], [role='textbox'], [role='searchbox'], [role='combobox'], [role='listbox'], [role='spinbutton'], [role='checkbox'], [role='radio'], [role='switch'], [aria-haspopup='listbox']"
       )
     );
     const normalized = (text) => String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -801,6 +801,16 @@ function initFloatingBar() {
       return !!el.querySelector("input[type='file'], button, a, [role='button']") &&
         /\b(upload|attach|resume|cv|file|browse|drag\s*&?\s*drop)\b/i.test(uploadText);
     };
+    const shouldUseUploadContainer = () => type === "file";
+    const isActionButtonText = (text) =>
+      /^(?:back|previous|prev|next|continue|cancel|close|done|finish|submit|send|apply|review|save)\b/i.test(
+        normalized(text)
+      );
+    const isResumeUploadText = (text) => {
+      const t = normalized(text);
+      if (!t || isActionButtonText(t)) return false;
+      return /\b(?:resume|cv)\b/i.test(t) || /\b(?:upload|autofill|attach|browse|select file|drag\s*&?\s*drop)\b/i.test(t);
+    };
     const closestQuestionContainer = (el) => {
       let cur = el instanceof Element ? el : null;
       while (cur && cur !== document.documentElement) {
@@ -833,7 +843,7 @@ function initFloatingBar() {
     // only trust refs that still point at a connected, visible element.
     if (ref && refMap?.get) {
       const byRef = refMap.get(ref) || refMap.get(ref.toLowerCase());
-      if (isUsableElement(byRef)) return type === "file" ? closestUploadContainer(byRef) : byRef;
+      if (isUsableElement(byRef)) return shouldUseUploadContainer() ? closestUploadContainer(byRef) : byRef;
     }
     const labelledByText = (el) => {
       const ids = String(el?.getAttribute?.("aria-labelledby") || "").split(/\s+/).filter(Boolean);
@@ -889,6 +899,64 @@ function initFloatingBar() {
     const scopedDatePart = findScopedDatePart();
     if (scopedDatePart) return scopedDatePart;
     if (!label) return null;
+    const findButtonFieldTarget = () => {
+      if (type !== "button") return null;
+      let bestButton = null;
+      let bestButtonScore = -1;
+      for (const el of Array.from(document.querySelectorAll("button, [role='button']"))) {
+        if (!(el instanceof HTMLElement) || isIgnoredContainer(el)) continue;
+        const aria = normalized(el.getAttribute("aria-label"));
+        const ariaLabelledBy = normalized(labelledByText(el));
+        const title = normalized(el.getAttribute("title"));
+        const text = normalized(el.textContent);
+        const combined = [aria, ariaLabelledBy, title, text].filter(Boolean).join(" ");
+        if (!isResumeUploadText(combined)) continue;
+        let score = 30;
+        if (looksEquivalentLabel(combined)) score += 40;
+        if (/\b(?:resume|cv)\b/i.test(combined)) score += 30;
+        if (/\b(?:upload|autofill|attach|browse|select file)\b/i.test(combined)) score += 20;
+        const rect = el.getBoundingClientRect?.();
+        if (rect && rect.width > 0 && rect.height > 0) score += 20;
+        if (score > bestButtonScore) {
+          bestButtonScore = score;
+          bestButton = el;
+        }
+      }
+      if (bestButton) return bestButton;
+
+      let bestLabel = null;
+      let bestLabelScore = -1;
+      const labelCandidates = Array.from(
+        document.querySelectorAll(
+          "label, legend, h1, h2, h3, h4, h5, h6, [role='heading'], span, p, div, [aria-label]"
+        )
+      );
+      for (const el of labelCandidates) {
+        if (!(el instanceof HTMLElement) || isIgnoredContainer(el) || !isUsableElement(el)) continue;
+        const text = normalized([el.getAttribute("aria-label"), el.textContent].filter(Boolean).join(" "));
+        if (!isResumeUploadText(text) || !looksEquivalentLabel(text)) continue;
+        if (el.querySelector("input, textarea, select, button, [role='button']")) continue;
+        const tag = el.tagName.toLowerCase();
+        const isSemanticLabel =
+          tag === "label" ||
+          tag === "legend" ||
+          /^h[1-6]$/.test(tag) ||
+          el.getAttribute("role") === "heading";
+        const shortText = text.length <= 120;
+        if (!isSemanticLabel && !shortText) continue;
+        const rect = el.getBoundingClientRect?.();
+        const area = rect ? Math.max(1, rect.width * rect.height) : 1;
+        const score = (isSemanticLabel ? 100 : 60) + (shortText ? 20 : 0) + (1000000 / area);
+        if (score > bestLabelScore) {
+          bestLabelScore = score;
+          bestLabel = el;
+        }
+      }
+      if (bestLabel) return bestLabel;
+      return null;
+    };
+    const buttonFieldTarget = findButtonFieldTarget();
+    if (buttonFieldTarget) return buttonFieldTarget;
     const findChoiceGroupContainer = () => {
       if (type !== "radio" && type !== "checkbox") return null;
       const groupCandidates = Array.from(
@@ -912,7 +980,7 @@ function initFloatingBar() {
       return bestGroup;
     };
     const findUploadGroupContainer = () => {
-      if (type !== "file") return null;
+      if (!shouldUseUploadContainer()) return null;
       const uploadCandidates = Array.from(document.querySelectorAll("li, fieldset, section, article, div"));
       let bestUpload = null;
       let bestUploadScore = -1;
@@ -956,7 +1024,7 @@ function initFloatingBar() {
         bestScore = score;
         best = type === "radio" || type === "checkbox"
           ? closestQuestionContainer(el)
-          : type === "file"
+          : shouldUseUploadContainer()
             ? closestUploadContainer(el)
             : el;
       }
